@@ -60,6 +60,7 @@ from synapse.config import (  # noqa: F401
     user_types,
     voip,
     workers,
+    notification_routing
 )
 from synapse.types import StrSequence
 
@@ -126,6 +127,7 @@ class RootConfig:
     task_scheduler: task_scheduler.TaskSchedulerConfig
     mas: mas.MasConfig
     matrix_rtc: matrixrtc.MatrixRtcConfig
+    notification_routing: notification_routing.NotificationRoutingConfig
 
     config_classes: list[type["Config"]] = ...
     config_files: list[str]

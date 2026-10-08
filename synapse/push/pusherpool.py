@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Iterable
 
 from prometheus_client import Gauge
 
+from synapse.api.constants import PresenceState
 from synapse.api.errors import Codes, SynapseError
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.metrics.background_process_metrics import (
@@ -103,6 +104,8 @@ class PusherPool:
         self.pushers: dict[str, dict[str, Pusher]] = {}
 
         self._account_validity_handler = hs.get_account_validity_handler()
+
+        self.notification_routing_config = hs.config.notification_routing
 
     def start(self) -> None:
         """Starts the pushers off in a background process."""
@@ -303,11 +306,72 @@ class PusherPool:
                     continue
 
                 if u in self.pushers:
+                    user_is_online = False
+                    if self._routing_active():
+                        presence = await self.hs.get_presence_handler().current_state_for_user(u)
+                        user_is_online = presence.state == PresenceState.ONLINE
+
+                        logger.debug(
+                            "Notification routing: user=%s presence=%s suppress_mobile=%s",
+                            u,
+                            presence.state,
+                            user_is_online,
+                        )
+
                     for p in self.pushers[u].values():
+                        if user_is_online and self._is_mobile_pusher(p):
+                            logger.info(
+                                "Notification routing: user=%s is online, holding back mobile pusher %s",
+                                u,
+                                p.name,
+                            )
+                            continue
+
                         p.on_new_notifications(max_token)
 
         except Exception:
             logger.exception("Exception in pusher on_new_notifications")
+
+    def _is_mobile_pusher(self, p: Pusher) -> bool:
+        return p.app_id in self.notification_routing_config.mobile_app_ids
+
+    def _routing_active(self) -> bool:
+        cfg = self.notification_routing_config
+        return bool(cfg.enabled and cfg.suppress_when_online and cfg.mobile_app_ids)
+
+    async def on_user_became_inactive(self, user_id: str) -> None:
+        """Called when a local user goes from online to idle/offline.
+
+        Mobile pushers were not poked while the user was online, so their
+        position is still before any notifications that arrived in that time.
+        Poking them now delivers whatever is still unread (the HTTP pusher only
+        sends push actions not covered by a read receipt), instead of waiting
+        for the next incoming message.
+        """
+        pusher_dict = self.pushers.get(user_id)
+        logger.info(
+            "Notification routing: user=%s became inactive (routing_active=%s, pushers=%s)",
+            user_id,
+            self._routing_active(),
+            list(pusher_dict.keys()) if pusher_dict else [],
+        )
+
+        if not self._routing_active() or not pusher_dict:
+            return
+
+        try:
+            max_token = self.store.get_room_max_token()
+
+            for pusher in pusher_dict.values():
+                if self._is_mobile_pusher(pusher):
+                    logger.info(
+                        "Notification routing: user=%s became inactive, waking mobile pusher %s",
+                        user_id,
+                        pusher.name,
+                    )
+                    pusher.on_new_notifications(max_token)
+        except Exception:
+            logger.exception("Exception in pusher on_user_became_inactive")
 
     async def on_new_receipts(self, users_affected: StrCollection) -> None:
         if not self.pushers:

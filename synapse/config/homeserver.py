@@ -19,6 +19,7 @@
 #
 #
 
+from synapse.config.notification_routing import NotificationRoutingConfig
 from synapse.config.push_rules import PushRulesConfig
 
 from ._base import ConfigError, RootConfig
@@ -124,6 +125,7 @@ class HomeServerConfig(RootConfig):
         TaskSchedulerConfig,
         # This must be last, as it checks for conflicts with other config options.
         MasConfig,
+        NotificationRoutingConfig,
     ]
 
     def validate_config(

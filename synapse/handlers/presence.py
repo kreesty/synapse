@@ -410,6 +410,22 @@ class BasePresenceHandler(abc.ABC):
         This is a no-op when presence is handled by a different worker.
         """
 
+    async def _maybe_flush_mobile_pushers(
+        self, old_state: UserPresenceState | None, new_state: UserPresenceState
+    ) -> None:
+        """If a local user just went from online to idle/offline, poke their
+        mobile pushers so that notifications suppressed while they were active
+        (and which are still unread) get delivered now, rather than on the next
+        incoming message.
+        """
+        if (
+            old_state is not None
+            and old_state.state == PresenceState.ONLINE
+            and new_state.state in (PresenceState.UNAVAILABLE, PresenceState.OFFLINE)
+            and self.is_mine_id(new_state.user_id)
+        ):
+            await self.hs.get_pusherpool().on_user_became_inactive(new_state.user_id)
+
     async def process_replication_rows(
         self, stream_name: str, instance_name: str, token: int, rows: list
     ) -> None:
@@ -753,6 +769,8 @@ class WorkerPresenceHandler(BasePresenceHandler):
                 last_active_granularity=self._last_active_granularity,
             ):
                 state_to_notify.append(new_state)
+
+            await self._maybe_flush_mobile_pushers(old_state, new_state)
 
         stream_id = token
         await self.notify_from_replication(state_to_notify, stream_id)
@@ -1113,6 +1131,8 @@ class PresenceHandler(BasePresenceHandler):
 
             to_notify = {}  # Changes we want to notify everyone about
             to_federation_ping = {}  # These need sending keep-alives
+            # (old, new) states for users whose presence level changed
+            state_transitions = []
 
             # Only bother handling the last presence change for each user
             new_states_dict = {}
@@ -1151,6 +1171,9 @@ class PresenceHandler(BasePresenceHandler):
 
                 self.user_to_current_state[user_id] = new_state
 
+                if prev_state.state != new_state.state:
+                    state_transitions.append((prev_state, new_state))
+
                 if should_notify:
                     to_notify[user_id] = new_state
                 elif should_ping:
@@ -1167,6 +1190,9 @@ class PresenceHandler(BasePresenceHandler):
                     **{SERVER_NAME_LABEL: self.server_name}
                 ).inc(len(to_notify))
                 await self._persist_and_notify(list(to_notify.values()))
+
+            for prev_state, new_state in state_transitions:
+                await self._maybe_flush_mobile_pushers(prev_state, new_state)
 
             self.unpersisted_users_changes |= {s.user_id for s in new_states}
             self.unpersisted_users_changes -= set(to_notify.keys())
