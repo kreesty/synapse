@@ -452,6 +452,49 @@ class TestBulkPushRuleEvaluator(HomeserverTestCase):
             )
         )
 
+    def test_silent_messages(self) -> None:
+        """Under the default push rules, messages flagged as silent should not generate notifications."""
+        bulk_evaluator = BulkPushRuleEvaluator(self.hs)
+
+        mention = {
+            "body": "Test message",
+            "msgtype": "m.text",
+            EventContentFields.MENTIONS: {"user_ids": [self.alice]},
+        }
+
+        # A mention notifies as usual.
+        self.assertTrue(self._create_and_process(bulk_evaluator, mention))
+
+        # The same mention sent silently does not notify.
+        self.assertFalse(
+            self._create_and_process(
+                bulk_evaluator, {**mention, "org.matrix.custom.silent": True}
+            )
+        )
+
+        # Only an exact `true` value makes a message silent.
+        for value in (False, "true"):
+            self.assertTrue(
+                self._create_and_process(
+                    bulk_evaluator, {**mention, "org.matrix.custom.silent": value}
+                )
+            )
+
+        # Encrypted messages notify, unless the client copied the flag outside the ciphertext.
+        encrypted = {"algorithm": "m.megolm.v1.aes-sha2", "ciphertext": "secret"}
+        self.assertTrue(
+            self._create_and_process(
+                bulk_evaluator, encrypted, type=EventTypes.Encrypted
+            )
+        )
+        self.assertFalse(
+            self._create_and_process(
+                bulk_evaluator,
+                {**encrypted, "org.matrix.custom.silent": True},
+                type=EventTypes.Encrypted,
+            )
+        )
+
     @override_config({"experimental_features": {"msc4306_enabled": True}})
     def test_thread_subscriptions(self) -> None:
         bulk_evaluator = BulkPushRuleEvaluator(self.hs)

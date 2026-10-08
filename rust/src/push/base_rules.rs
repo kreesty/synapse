@@ -70,6 +70,22 @@ pub const BASE_PREPEND_OVERRIDE_RULES: &[PushRule] = &[PushRule {
 }];
 
 pub const BASE_APPEND_OVERRIDE_RULES: &[PushRule] = &[
+    // Messages sent with the `@silent` prefix never notify, even if they mention the user.
+    // This comes first so that it takes precedence over the mention rules, and over pushing all encrypted
+    // events when MSC4028 is enabled. Clients copy the flag outside the ciphertext of encrypted events.
+    PushRule {
+        rule_id: Cow::Borrowed("global/override/.org.matrix.custom.rule.silent"),
+        priority_class: 5,
+        conditions: Cow::Borrowed(&[Condition::Known(KnownCondition::EventPropertyIs(
+            EventPropertyIsCondition {
+                key: Cow::Borrowed(r"content.org\.matrix\.custom\.silent"),
+                value: Cow::Owned(SimpleJsonValue::Bool(true)),
+            },
+        ))]),
+        actions: Cow::Borrowed(&[]),
+        default: true,
+        default_enabled: true,
+    },
     PushRule {
         rule_id: Cow::Borrowed("global/override/.org.matrix.msc4028.encrypted_event"),
         priority_class: 5,
