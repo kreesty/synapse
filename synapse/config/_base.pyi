@@ -34,6 +34,7 @@ from synapse.config import (  # noqa: F401
     matrixrtc,
     metrics,
     modules,
+    notification_routing,
     oembed,
     oidc,
     password_auth_providers,
@@ -60,7 +61,6 @@ from synapse.config import (  # noqa: F401
     user_types,
     voip,
     workers,
-    notification_routing
 )
 from synapse.types import StrSequence
 

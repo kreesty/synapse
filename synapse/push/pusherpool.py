@@ -308,7 +308,11 @@ class PusherPool:
                 if u in self.pushers:
                     user_is_online = False
                     if self._routing_active():
-                        presence = await self.hs.get_presence_handler().current_state_for_user(u)
+                        presence = (
+                            await self.hs.get_presence_handler().current_state_for_user(
+                                u
+                            )
+                        )
                         user_is_online = presence.state == PresenceState.ONLINE
 
                         logger.debug(
